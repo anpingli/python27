@@ -1,0 +1,10 @@
+---
+tests:
+  playbooks:
+    - location: tests/tests-openshift.yaml
+      vars:
+        foo: bar
+results:
+  delivery_types:
+    email:
+      - shebert@redhat.com

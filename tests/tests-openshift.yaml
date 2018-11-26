@@ -1,0 +1,59 @@
+- hosts: all
+  gather_facts: false
+  tags:
+    - openshift
+  vars:
+    - image_full_name: "registry.access.redhat.com/rhscl/python-27-rhel7:latest"
+    - image_registry_url: "registry.access.redhat.com"
+    - image_namespace: "rhscl"
+    - image_name: "python-27-rhel7"
+    - image_tag: "latest"
+    - openshift_cluster_url: "https://upshift.engineering.redhat.com"
+    - openshift_auth_token: ""
+    - openshift_username: "developer"
+    - openshift_project_name: ""
+
+  environment:
+    VERSION: 2.7
+    IMAGE_FULL_NAME: "{{ image_full_name }}"
+    IMAGE_REGISTRY_URL: "{{ image_registry_url }}"
+    IMAGE_NAMESPACE: "{{ image_namespace }}"
+    IMAGE_NAME: "{{ image_name }}"
+    IMAGE_TAG: "{{ image_tag }}"
+    OPENSHIFT_CLUSTER_URL: "{{ openshift_cluster_url }}"
+    OPENSHIFT_AUTH_TOKEN: "{{ openshift_auth_token }}"
+    OPENSHIFT_USERNAME: "{{ openshift_username }}"
+    OPENSHIFT_PROJECT_NAME: "{{ openshift_project_name }}"
+
+  tasks:
+    - name: "Make sure artifacts/ dir exists"
+      file:
+        path: "artifacts/"
+        state: directory
+
+    - name: "Run 'openshift-deploy-simple-app' test"
+      shell: ./runtest.sh | tee ../artifacts/test-openshift-deploy-simple-app.log
+      args:
+        chdir: openshift-deploy-simple-app
+
+    - name: "Run 'verify python binary is present' test (executes a command inside a running container)"
+      block:
+        - name: Log into the OpenShift cluster
+          shell: oc login {{ openshift_cluster_url }} --token="{{ openshift_auth_token }}" --insecure-skip-tls-verify
+        - name: Select the project {{ openshift_project_name }}
+          shell: oc project {{ openshift_project_name }}
+        - name: Import the image into OpenShift
+          shell: oc import-image {{ image_name }} --from={{ image_full_name }} --insecure=true --confirm
+        - name: Get imported image registry URL
+          shell: oc get is {{ image_name }} --output=jsonpath='{ .status.dockerImageRepository }'
+          register: imported_image_url
+        - name: Start a dummy {{ image_namespace }}/{{ image_name }}:{{ image_tag }} container
+          shell: oc run python-cmd-test -i --image={{ imported_image_url.stdout }} --command -- bash
+        - name: Figure out a pod name for the started container
+          shell: oc get pods --selector deploymentconfig=python-cmd-test --output=jsonpath='{ .items[*].metadata.name }'
+          register: pod_name
+        - name: Make sure 'python' command is available in the container
+          shell: oc exec {{ pod_name.stdout }} -- python --version
+          register: python_cmd_run
+        - debug:
+            msg: "{{ python_cmd_run.stderr }}" # 'python --version' actually prints the version to STDERR, not STDOUT
